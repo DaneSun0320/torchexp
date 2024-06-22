@@ -1,0 +1,23 @@
+dataset:
+  root: /path/to/dataset
+  train:
+    path: train
+
+  val:
+    path: val
+
+train:
+  net:  resnet18
+  criterion:
+    type:  CustomLoss
+    params:
+      img_size:  $(img_size)
+  optimizer:  sgd
+
+# 实现函数映射
+func_config:
+  train_batch_func:  train_batch
+  val_func:  val_batch
+  infer_func:  infer_single
+
+
