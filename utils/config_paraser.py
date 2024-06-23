@@ -1,6 +1,8 @@
 """
 
 """
+from types import SimpleNamespace
+
 import yaml
 
 class ConfigParser:
@@ -13,7 +15,7 @@ class ConfigParser:
             return yaml.safe_load(f)
 
     def get_config(self):
-        print(self.config)
+        return SimpleNamespace(**self.config)
 
 
 

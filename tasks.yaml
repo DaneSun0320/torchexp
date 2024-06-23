@@ -1,0 +1,5 @@
+conda_env: temp
+gpu_ids: [0]
+tasks:
+  - ls -l
+  - echo "Hello, world!"
