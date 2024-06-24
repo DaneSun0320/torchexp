@@ -1,6 +1,8 @@
 import glob
+import json
 import os
 import xml.etree.ElementTree as ET
+from collections import defaultdict
 from typing import List, Union
 
 import numpy as np
@@ -217,5 +219,168 @@ class VOCParaser:
         bak_count = len(glob.glob(f'{annotation_file}.bak*'))
         os.rename(annotation_file, f'{annotation_file}.bak{bak_count}')
         tree.write(annotation_file)
+
+    def voc_to_coco(self, save_dir, train_split_file, val_split_file=None, test_split_file=None, copy_images=True):
+        def get_voc_annotations(voc_dir):
+            annotations = []
+            label_map = defaultdict(lambda: len(label_map))
+            label_map["background"] = 0
+
+            for xml_file in os.listdir(voc_dir):
+                if not xml_file.endswith(".xml"):
+                    continue
+                tree = ET.parse(os.path.join(voc_dir, xml_file))
+                root = tree.getroot()
+
+                annotation = {}
+                annotation["filename"] = root.find("filename").text
+                size = root.find("size")
+                annotation["size"] = {
+                    "width": int(size.find("width").text),
+                    "height": int(size.find("height").text)
+                }
+
+                objects = []
+                for obj in root.findall("object"):
+                    obj_dict = {}
+                    obj_dict["name"] = obj.find("name").text
+                    bbox = obj.find("bndbox")
+                    obj_dict["bndbox"] = {
+                        "xmin": int(bbox.find("xmin").text),
+                        "ymin": int(bbox.find("ymin").text),
+                        "xmax": int(bbox.find("xmax").text),
+                        "ymax": int(bbox.find("ymax").text)
+                    }
+                    objects.append(obj_dict)
+                annotation["objects"] = objects
+                annotations.append(annotation)
+
+            return annotations, label_map
+
+        def convert_to_coco(annotations, label_map):
+            coco = {
+                "images": [],
+                "annotations": [],
+                "categories": []
+            }
+
+            for label, id in label_map.items():
+                coco["categories"].append({
+                    "supercategory": "none",
+                    "id": id,
+                    "name": label
+                })
+
+            annotation_id = 1
+            for img_id, annotation in enumerate(annotations):
+                img_info = {
+                    "file_name": annotation["filename"],
+                    "height": annotation["size"]["height"],
+                    "width": annotation["size"]["width"],
+                    "id": img_id
+                }
+                coco["images"].append(img_info)
+
+                for obj in annotation["objects"]:
+                    bbox = obj["bndbox"]
+                    xmin = bbox["xmin"]
+                    ymin = bbox["ymin"]
+                    xmax = bbox["xmax"]
+                    ymax = bbox["ymax"]
+                    width = xmax - xmin
+                    height = ymax - ymin
+
+                    ann = {
+                        "id": annotation_id,
+                        "image_id": img_id,
+                        "category_id": label_map[obj["name"]],
+                        "bbox": [xmin, ymin, width, height],
+                        "area": width * height,
+                        "iscrowd": 0
+                    }
+                    coco["annotations"].append(ann)
+                    annotation_id += 1
+
+            return coco
+
+        train_image_list = []
+        val_image_list = []
+        test_image_list = []
+        print('Converting VOC to COCO format...')
+
+        print('Reading image list...')
+        with open(os.path.join(self.root_dir, 'ImageSets', 'Main', train_split_file)) as f:
+                train_image_list.extend(f.read().strip().split())
+        if val_split_file:
+            with open(os.path.join(self.root_dir, 'ImageSets', 'Main', val_split_file)) as f:
+                val_image_list.extend(f.read().strip().split())
+        if test_split_file:
+            with open(os.path.join(self.root_dir, 'ImageSets', 'Main', test_split_file)) as f:
+                test_image_list.extend(f.read().strip().split())
+
+        print('Creating directories...')
+        if not os.path.exists(save_dir):
+            print('Creating directory:', save_dir)
+            os.makedirs(save_dir)
+        if not os.path.exists(os.path.join(save_dir, 'train2017')):
+            print('Creating directory:', os.path.join(save_dir, 'train2017'))
+            os.makedirs(os.path.join(save_dir, 'train2017'))
+        if val_split_file and not os.path.exists(os.path.join(save_dir, 'val2017')):
+            print('Creating directory:', os.path.join(save_dir, 'val2017'))
+            os.makedirs(os.path.join(save_dir, 'val2017'))
+        if test_split_file and not os.path.exists(os.path.join(save_dir, 'test2017')):
+            print('Creating directory:', os.path.join(save_dir, 'test2017'))
+            os.makedirs(os.path.join(save_dir, 'test2017'))
+        if copy_images:
+            print('Copying images...')
+            for img_list, split in [(train_image_list, 'train'), (val_image_list, 'val'), (test_image_list, 'test')]:
+                process_bar = tqdm(img_list, desc=f'Copying {split} images')
+                for img in process_bar:
+                    try:
+                        img_path = glob.glob(os.path.join(self.image_dir, f'{img}.jpg'))[0]
+                        os.system(f'cp {img_path} {os.path.join(save_dir, split)}')
+                    except IndexError:
+                        print(f'\n Image {img} not found. Skipping...')
+
+        if not os.path.exists(os.path.join(save_dir, 'annotations')):
+            print('Creating directory:', os.path.join(save_dir, 'annotations'))
+            os.makedirs(os.path.join(save_dir, 'annotations'))
+
+        # 在目标目录中创建temp文件夹
+        if not os.path.exists(os.path.join(save_dir, 'temp')):
+            print('Creating directory:', os.path.join(save_dir, 'temp'))
+            os.makedirs(os.path.join(save_dir, 'temp'))
+            os.makedirs(os.path.join(save_dir, 'temp', 'train'))
+            os.makedirs(os.path.join(save_dir, 'temp', 'val'))
+            os.makedirs(os.path.join(save_dir, 'temp', 'test'))
+
+        # 复制原始注释文件到temp文件夹
+        print('Copying annotations...')
+        for img_list, split in [(train_image_list, 'train'), (val_image_list, 'val'), (test_image_list, 'test')]:
+            process_bar = tqdm(img_list, desc=f'Copying {split} annotations')
+            for img in process_bar:
+                try:
+                    annotation_path = os.path.join(self.annotation_dir, f'{img}.xml')
+                    os.system(f'cp {annotation_path} {os.path.join(save_dir, "temp", split)}')
+                except Exception:
+                    print(f'\n Annotation {img} not found. Skipping...')
+
+        print('Converting annotations...')
+        process_bar = tqdm([(train_image_list, 'train'), (val_image_list, 'val'), (test_image_list, 'test')], desc='Converting annotations')
+        for img_list, split in process_bar:
+            annotations, label_map = get_voc_annotations(os.path.join(save_dir, 'temp', split))
+            coco = convert_to_coco(annotations, label_map)
+            with open(os.path.join(save_dir, 'annotations', f'instances_{split}2017.json'), 'w') as f:
+                json.dump(coco, f)
+        print('Cleaning up...')
+        os.system(f'rm -rf {os.path.join(save_dir, "temp")}')
+        print('Conversion complete.')
+        print(f'COCO annotations saved to {os.path.join(save_dir, "annotations")}')
+        print(f'Images saved to {os.path.join(save_dir, "train2017")}')
+        if val_split_file:
+            print(f'Validation images saved to {os.path.join(save_dir, "val2017")}')
+        if test_split_file:
+            print(f'Test images saved to {os.path.join(save_dir, "test2017")}')
+
 
 
