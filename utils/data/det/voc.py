@@ -6,8 +6,11 @@ from collections import defaultdict
 from typing import List, Union
 
 import numpy as np
+from PIL import Image
+from matplotlib import patches, pyplot as plt
 from prettytable import PrettyTable
 from tqdm import tqdm
+
 class VOCParaser:
     def __init__(self, root_dir, image_set='train', data_split: Union[str, List] = None):
         if data_split is None:
@@ -322,15 +325,15 @@ class VOCParaser:
         if not os.path.exists(save_dir):
             print('Creating directory:', save_dir)
             os.makedirs(save_dir)
-        if not os.path.exists(os.path.join(save_dir, 'train2017')):
-            print('Creating directory:', os.path.join(save_dir, 'train2017'))
-            os.makedirs(os.path.join(save_dir, 'train2017'))
-        if val_split_file and not os.path.exists(os.path.join(save_dir, 'val2017')):
-            print('Creating directory:', os.path.join(save_dir, 'val2017'))
-            os.makedirs(os.path.join(save_dir, 'val2017'))
-        if test_split_file and not os.path.exists(os.path.join(save_dir, 'test2017')):
-            print('Creating directory:', os.path.join(save_dir, 'test2017'))
-            os.makedirs(os.path.join(save_dir, 'test2017'))
+        if not os.path.exists(os.path.join(save_dir, 'train')):
+            print('Creating directory:', os.path.join(save_dir, 'train'))
+            os.makedirs(os.path.join(save_dir, 'train'))
+        if val_split_file and not os.path.exists(os.path.join(save_dir, 'val')):
+            print('Creating directory:', os.path.join(save_dir, 'val'))
+            os.makedirs(os.path.join(save_dir, 'val'))
+        if test_split_file and not os.path.exists(os.path.join(save_dir, 'test')):
+            print('Creating directory:', os.path.join(save_dir, 'test'))
+            os.makedirs(os.path.join(save_dir, 'test'))
         if copy_images:
             print('Copying images...')
             for img_list, split in [(train_image_list, 'train'), (val_image_list, 'val'), (test_image_list, 'test')]:
@@ -370,17 +373,63 @@ class VOCParaser:
         for img_list, split in process_bar:
             annotations, label_map = get_voc_annotations(os.path.join(save_dir, 'temp', split))
             coco = convert_to_coco(annotations, label_map)
-            with open(os.path.join(save_dir, 'annotations', f'instances_{split}2017.json'), 'w') as f:
+            with open(os.path.join(save_dir, 'annotations', f'{split}.json'), 'w') as f:
                 json.dump(coco, f)
         print('Cleaning up...')
         os.system(f'rm -rf {os.path.join(save_dir, "temp")}')
         print('Conversion complete.')
         print(f'COCO annotations saved to {os.path.join(save_dir, "annotations")}')
-        print(f'Images saved to {os.path.join(save_dir, "train2017")}')
+        print(f'Images saved to {os.path.join(save_dir, "train")}')
         if val_split_file:
-            print(f'Validation images saved to {os.path.join(save_dir, "val2017")}')
+            print(f'Validation images saved to {os.path.join(save_dir, "val")}')
         if test_split_file:
-            print(f'Test images saved to {os.path.join(save_dir, "test2017")}')
+            print(f'Test images saved to {os.path.join(save_dir, "test")}')
 
 
+    def visualize_voc(self, save_path):
+        # 定义文件夹路径
+        image_folder = self.image_dir
+        annotation_folder = self.annotation_dir
+    
+        # 确保保存路径存在
+        os.makedirs(save_path, exist_ok=True)
+    
+        # 遍历所有注释文件
+        for annotation_file in os.listdir(annotation_folder):
+            if annotation_file.endswith('.xml'):
+                # 解析注释文件
+                tree = ET.parse(os.path.join(annotation_folder, annotation_file))
+                root = tree.getroot()
+    
+                # 获取图片文件名
+                filename = root.find('filename').text
+                filename = filename.replace('.JPG', '.jpg')
+                image_path = os.path.join(image_folder, filename)
+    
+                # 打开图片
+                image = Image.open(image_path)
+                fig, ax = plt.subplots(1)
+                ax.imshow(image)
+    
+                # 绘制边界框
+                for obj in root.iter('object'):
+                    bbox = obj.find('bndbox')
+                    xmin = int(bbox.find('xmin').text)
+                    ymin = int(bbox.find('ymin').text)
+                    xmax = int(bbox.find('xmax').text)
+                    ymax = int(bbox.find('ymax').text)
+                    rect = patches.Rectangle((xmin, ymin), xmax - xmin, ymax - ymin, linewidth=1, edgecolor='r',
+                                             facecolor='none')
+                    ax.add_patch(rect)
+    
+                # 保存可视化结果
+                save_image_path = os.path.join(save_path, filename)
+                plt.axis('off')  # 关闭坐标轴
+                plt.savefig(save_image_path, bbox_inches='tight', pad_inches=0)
+                plt.close(fig)
 
+
+if __name__ == '__main__':
+    voc = VOCParaser('/home/ubuntu/projects/pcb_wacv_2019/VOC/VOCdevkit/VOC2007', 'train', ['v3.txt', 'val.txt'])
+    voc.show_data_info()
+    voc.visualize_voc('/home/ubuntu/projects/pcb_wacv_2019/visualize')
